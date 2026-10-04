@@ -2,7 +2,9 @@
 
 配信アーカイブの音声から盛り上がった場面を探し、切り抜きとYouTubeの目次づくりを手伝うブラウザツールです。
 
-- **インストール不要。** GitHub Pages のページを開いて、動画を選ぶだけで使えます。
+**▶ ツールを開く: https://ibaran1um.github.io/Excitement-Finder/**
+
+- **インストール不要。** [ツールのページ](https://ibaran1um.github.io/Excitement-Finder/)を開いて、動画を選ぶだけで使えます。
 - **動画は外に出ません。** 解析も書き出しもブラウザの中だけで行い、どこにも送信しません。外部のライブラリやサーバーも使っていません。
 - **長時間のアーカイブに対応。** MP4・MOV・MKV・WebM は動画を少しずつ読みながら音声だけを解析するため、数時間の動画でもメモリをほとんど使いません。
 
@@ -63,15 +65,15 @@
 
 ```
 index.html
-css/style.css
-js/app.js               画面と操作
-js/analyzer-worker.js   解析（ワーカー）
-js/demux.js             MP4・MKV・WebM から音声データを取り出す
-js/detect.js            候補の検出
-js/timeline.js          タイムラインの描画と操作
-js/exporters.js         目次・CSV・ffmpegスクリプト
-js/recorder.js          ブラウザでの動画書き出し
-js/util.js              共通処理
+style.css
+app.js               画面と操作
+analyzer-worker.js   解析（ワーカー）
+demux.js             MP4・MKV・WebM から音声データを取り出す
+detect.js            候補の検出
+timeline.js          タイムラインの描画と操作
+exporters.js         目次・CSV・ffmpegスクリプト
+recorder.js          ブラウザでの動画書き出し
+util.js              共通処理
 ```
 
 ## 切り抜きについての注意
