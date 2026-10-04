@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>盛り上がりファインダー</title>
+<meta name="description" content="配信アーカイブの音声から盛り上がった場面を探し、切り抜きと目次づくりを手伝うツール。動画はブラウザ内だけで処理され、外部に送信されません。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <h1>盛り上がりファインダー</h1>
+    <span class="ver">v1.0</span>
+  </div>
+  <nav class="bar-actions" aria-label="ファイル操作">
+    <label class="btn primary" for="fileIn">動画を開く</label>
+    <input type="file" id="fileIn" accept="video/*,audio/*" class="vh">
+    <button type="button" class="btn" id="saveProj" disabled>作業を保存</button>
+    <label class="btn" for="projIn" id="loadProjLabel" aria-disabled="true">作業を読み込む</label>
+    <input type="file" id="projIn" accept=".json,application/json" class="vh" disabled>
+    <button type="button" class="btn icon" id="helpBtn" aria-label="使い方とショートカット">?</button>
+    <button type="button" class="btn" id="themeBtn">テーマ: 自動</button>
+  </nav>
+</header>
+
+<div id="progress" class="progress" hidden>
+  <div class="progress-text"><span id="progStage">準備しています</span><span id="progPct"></span></div>
+  <div class="progress-track"><div class="progress-fill" id="progFill"></div></div>
+</div>
+<p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+
+<section id="empty" class="empty">
+  <label for="fileIn" class="drop" id="drop">
+    <span class="drop-title">配信アーカイブをここにドロップ</span>
+    <span class="drop-sub">またはクリックしてファイルを選択（動画・音声どちらでも）</span>
+  </label>
+  <div class="facts">
+    <div><h2>外に出ない</h2><p>解析も書き出しもこのブラウザの中だけで行います。動画がどこかへ送信されることはありません。</p></div>
+    <div><h2>声の盛り上がりを拾う</h2><p>全体の音量と、人の声が多く含まれる帯域の音量を、直前1分間の平均的な音量と比べて候補を探します。</p></div>
+    <div><h2>そのまま使える形で出す</h2><p>YouTubeの目次、CSV、ffmpeg用の切り抜きスクリプト、ブラウザでの動画書き出し（縦型にも対応）。</p></div>
+  </div>
+</section>
+
+<main id="work" hidden>
+  <div class="top">
+    <section class="stage" aria-label="プレビュー">
+      <div class="player" id="player"></div>
+      <div class="transport" role="toolbar" aria-label="再生操作">
+        <button type="button" class="btn" id="prevBtn" title="前の候補 (P)">前の候補</button>
+        <button type="button" class="btn primary" id="playClipBtn" title="選択中の候補を再生 (Enter)">候補を再生</button>
+        <button type="button" class="btn" id="nextBtn" title="次の候補 (N)">次の候補</button>
+        <button type="button" class="btn" id="loopBtn" aria-pressed="false" title="候補の範囲を繰り返す (L)">繰り返し</button>
+        <button type="button" class="btn" id="queueBtn" title="採用した候補を順番に再生">採用分を通し再生</button>
+        <span class="sep" aria-hidden="true"></span>
+        <button type="button" class="btn" id="addBtn" title="現在位置に候補を追加 (M)">ここに候補を追加</button>
+        <button type="button" class="btn" id="setInBtn" title="選択中の候補の開始を現在位置に (I)">開始をここに</button>
+        <button type="button" class="btn" id="setOutBtn" title="選択中の候補の終了を現在位置に (O)">終了をここに</button>
+        <span class="clock" id="clock">0:00:00.0</span>
+      </div>
+    </section>
+
+    <aside class="cands" aria-labelledby="candTitle">
+      <div class="cands-head">
+        <h2 id="candTitle">候補 <span id="candCount" class="dim"></span></h2>
+        <select id="sortSel" aria-label="並び順">
+          <option value="score">盛り上がり順</option>
+          <option value="time">時間順</option>
+        </select>
+      </div>
+      <div class="filters" role="group" aria-label="表示する候補">
+        <button type="button" data-filter="all" aria-pressed="true">すべて</button>
+        <button type="button" data-filter="adopted" aria-pressed="false">採用</button>
+        <button type="button" data-filter="new" aria-pressed="false">未判定</button>
+        <button type="button" data-filter="rejected" aria-pressed="false">不採用</button>
+      </div>
+      <ol id="candList" class="cand-list"></ol>
+    </aside>
+  </div>
+
+  <section class="timeline" aria-label="タイムライン">
+    <div class="tl-bar">
+      <div class="zoom" role="group" aria-label="拡大縮小">
+        <button type="button" class="btn small" id="zoomOut" aria-label="縮小">−</button>
+        <button type="button" class="btn small" id="zoomIn" aria-label="拡大">＋</button>
+        <button type="button" class="btn small" id="zoomFit">全体を表示</button>
+        <button type="button" class="btn small" id="zoomClip">選択中の候補に寄る</button>
+      </div>
+      <div class="legend">
+        <span class="lg lg-all">音量</span>
+        <span class="lg lg-voice">声の帯域</span>
+        <span class="lg lg-base">直前1分の基準</span>
+        <span class="lg lg-cand">候補</span>
+        <span class="lg lg-adopt">採用</span>
+      </div>
+    </div>
+    <canvas id="detail" class="detail" aria-label="拡大タイムライン。クリックで移動、ホイールで拡大縮小、候補の端をドラッグで範囲調整"></canvas>
+    <canvas id="overview" class="overview" aria-label="全体タイムライン。クリックやドラッグで表示位置を移動"></canvas>
+    <p class="tl-hint">クリックで移動 ／ ホイールで拡大縮小 ／ 何もない所をドラッグで左右に移動 ／ 候補の端をドラッグで範囲を調整</p>
+  </section>
+
+  <section class="tabs">
+    <div role="tablist" aria-label="設定と書き出し" class="tablist">
+      <button role="tab" id="tab-detect" aria-controls="panel-detect" aria-selected="true">検出の設定</button>
+      <button role="tab" id="tab-export" aria-controls="panel-export" aria-selected="false" tabindex="-1">書き出し</button>
+    </div>
+
+    <div role="tabpanel" id="panel-detect" aria-labelledby="tab-detect" class="panel">
+      <fieldset class="modes">
+        <legend>配信の種類</legend>
+        <label><input type="radio" name="mode" value="talk" checked> <span><strong>雑談・実況</strong><small>音量と声を半々より少し声寄りで判定</small></span></label>
+        <label><input type="radio" name="mode" value="game"> <span><strong>ゲーム音が大きい</strong><small>主に声の帯域の変化で判定</small></span></label>
+        <label><input type="radio" name="mode" value="music"> <span><strong>歌・音楽</strong><small>主に全体の音量の変化で判定</small></span></label>
+      </fieldset>
+      <div class="sliders">
+        <label>感度（基準との差がこれ以上なら候補）<output id="o-sens"></output><input type="range" id="s-sens" min="3" max="20" step="0.5" value="6"></label>
+        <label>候補どうしの最小間隔<output id="o-gap"></output><input type="range" id="s-gap" min="10" max="300" step="5" value="45"></label>
+        <label>山の前に含める長さ<output id="o-pre"></output><input type="range" id="s-pre" min="0" max="120" step="1" value="20"></label>
+        <label>山の後に含める長さ<output id="o-post"></output><input type="range" id="s-post" min="0" max="120" step="1" value="10"></label>
+        <label>候補の最大数<output id="o-max"></output><input type="range" id="s-max" min="5" max="100" step="1" value="20"></label>
+      </div>
+      <p class="hint">設定を変えると候補を自動で作り直します。採用・不採用にした候補、メモを書いた候補、範囲を調整した候補、手動で追加した候補はそのまま残ります。</p>
+    </div>
+
+    <div role="tabpanel" id="panel-export" aria-labelledby="tab-export" class="panel" hidden>
+      <div class="exports">
+        <section class="xp">
+          <h3>YouTubeの目次</h3>
+          <p class="hint">採用した候補の開始位置から、概要欄に貼れる目次を作ります。タイトルには候補のメモが使われます。</p>
+          <label class="field">最初のチャプター名<input type="text" id="firstTitle" value="オープニング"></label>
+          <textarea id="chapters" rows="8" aria-label="目次のプレビュー" readonly></textarea>
+          <ul id="chapWarn" class="warn"></ul>
+          <button type="button" class="btn primary" id="copyChap">目次をコピー</button>
+          <span class="dim" id="copyChapMsg" aria-live="polite"></span>
+        </section>
+
+        <section class="xp">
+          <h3>一覧とffmpegスクリプト</h3>
+          <p class="hint">候補の一覧をCSVで保存したり、手元のffmpegで切り抜くためのスクリプトを作ったりできます。</p>
+          <div class="row">
+            <label class="field">対象
+              <select id="scopeSel"><option value="adopted">採用した候補</option><option value="active">選択中の候補</option><option value="all">不採用以外すべて</option></select>
+            </label>
+          </div>
+          <button type="button" class="btn" id="csvBtn">CSVを保存</button>
+          <div class="row">
+            <label class="field">スクリプトの種類
+              <select id="osSel"><option value="bat">Windows（.bat）</option><option value="sh">Mac・Linux（.sh）</option></select>
+            </label>
+            <label class="field">切り抜き方
+              <select id="cutSel"><option value="copy">無劣化・高速</option><option value="encode">位置を正確に（再エンコード）</option></select>
+            </label>
+          </div>
+          <label class="check"><input type="checkbox" id="ffVertical"> 縦型（9:16）にする（再エンコードになります）</label>
+          <button type="button" class="btn" id="ffBtn">スクリプトを保存</button>
+          <p class="hint">「無劣化・高速」はキーフレーム単位で切るため、開始位置が指定より少し前にずれることがあります。スクリプトは動画と同じフォルダに置いて実行してください。clips フォルダに書き出されます（ffmpegのインストールが必要です）。</p>
+        </section>
+
+        <section class="xp">
+          <h3>ブラウザで動画を書き出す</h3>
+          <p class="hint">ffmpegが無くても、このページだけで切り抜き動画を作れます。再生しながら録画する方式のため、切り抜きの長さと同じだけ時間がかかります。書き出し中はこのタブを表に出したままにしてください。</p>
+          <div class="row">
+            <label class="field">対象
+              <select id="recScope"><option value="active">選択中の候補</option><option value="adopted">採用した候補すべて</option></select>
+            </label>
+            <label class="field">形
+              <select id="recShape"><option value="orig">元の比率のまま</option><option value="vertical">縦型（9:16）</option></select>
+            </label>
+            <label class="field">形式
+              <select id="recFmt"></select>
+            </label>
+          </div>
+          <div id="cropBox" class="crop" hidden>
+            <label class="field">切り取る位置（左右）<output id="o-crop"></output><input type="range" id="s-crop" min="0" max="1" step="0.01" value="0.5"></label>
+            <canvas id="cropPrev" width="180" height="320" aria-label="縦型の切り取り位置のプレビュー"></canvas>
+          </div>
+          <div class="row">
+            <button type="button" class="btn primary" id="recBtn">書き出しを開始</button>
+            <button type="button" class="btn" id="recCancel" hidden>中止</button>
+          </div>
+          <div id="recProg" class="progress inline" hidden>
+            <div class="progress-text"><span id="recStage"></span><span id="recPct"></span></div>
+            <div class="progress-track"><div class="progress-fill" id="recFill"></div></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>動画はこのブラウザの中だけで処理され、外部には送信されません。他の方の配信を切り抜くときは、その配信者の切り抜きガイドラインに従ってください。</p>
+  <p><a href="LICENSE">MIT License</a></p>
+</footer>
+
+<dialog id="help" aria-labelledby="helpTitle">
+  <h2 id="helpTitle">使い方</h2>
+  <ol class="steps">
+    <li>動画を開くと自動で解析され、盛り上がった場面が候補として並びます。</li>
+    <li>候補を再生して確認し、「採用」「不採用」を付けます。範囲はタイムラインで候補の端をドラッグするか、開始・終了ボタンで調整できます。</li>
+    <li>「書き出し」タブから、目次・CSV・ffmpegスクリプト・動画として書き出します。</li>
+  </ol>
+  <p class="hint">作業内容はこのブラウザに自動保存され、同じ動画を開くと復元されます。別のPCへ持っていくときは「作業を保存」を使ってください。</p>
+  <h3>キーボード操作</h3>
+  <table class="keys">
+    <tr><td><kbd>Space</kbd></td><td>再生・一時停止</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>5秒戻る・進む（<kbd>Shift</kbd>で1秒）</td></tr>
+    <tr><td><kbd>N</kbd> <kbd>P</kbd></td><td>次の候補・前の候補</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>選択中の候補を再生</td></tr>
+    <tr><td><kbd>A</kbd> <kbd>X</kbd></td><td>採用・不採用（もう一度押すと未判定に戻る）</td></tr>
+    <tr><td><kbd>M</kbd></td><td>現在位置に候補を追加</td></tr>
+    <tr><td><kbd>I</kbd> <kbd>O</kbd></td><td>選択中の候補の開始・終了を現在位置に</td></tr>
+    <tr><td><kbd>L</kbd></td><td>候補の範囲を繰り返し再生</td></tr>
+    <tr><td><kbd>+</kbd> <kbd>-</kbd></td><td>タイムラインの拡大・縮小</td></tr>
+    <tr><td><kbd>Delete</kbd></td><td>選択中の候補を削除</td></tr>
+  </table>
+  <form method="dialog"><button class="btn primary">閉じる</button></form>
+</dialog>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
